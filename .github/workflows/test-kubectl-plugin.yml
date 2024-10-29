@@ -8,7 +8,7 @@ jobs:
   kubectl-hlf:
     strategy:
       matrix:
-        go-version: [ 1.21.x ]
+        go-version: [ 1.23.x ]
         os: [ ubuntu-latest ]
     runs-on: ${{ matrix.os }}
     env:
@@ -33,7 +33,12 @@ jobs:
           cd kubectl-hlf
           go build -o kubectl-hlf ./main.go
           sudo mv kubectl-hlf /usr/local/bin/kubectl-hlf
-      - name: Build Docker Image
+
+      - name: Install operator CRDs deploy
+        run: |
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.4
+          make generate manifests install
+      - name: Deploy the operator
         run: |
           export GOOS=linux
           export GOARCH=amd64
@@ -41,19 +46,13 @@ jobs:
           go build -o hlf-operator ./main.go
           docker build -t "${IMAGE}:${TAG}" .
           kind load docker-image "${IMAGE}:${TAG}"
-      - name: Deploy operator
-        run: |
-          helm repo add kfs https://kfsoftware.github.io/hlf-helm-charts --force-update
-          helm install hlf-operator --version=1.10.0-beta2 kfs/hlf-operator --set image.repository="${IMAGE}" --set image.tag="${TAG}" --set image.pullPolicy="IfNotPresent"
+          make deploy IMG="${IMAGE}:${TAG}"
 
-      - name: Install operator CRDs
-        run: |
-          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0
-          make generate manifests install
+
       - name: Install Istio
         run: |
-          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.20.0 TARGET_ARCH=x86_64 sh -
-          export PATH="$PATH:$PWD/istio-1.20.0/bin"
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.23.2 TARGET_ARCH=x86_64 sh -
+          export PATH="$PATH:$PWD/istio-1.23.2/bin"
           kubectl create namespace istio-system
 
           istioctl operator init
@@ -123,7 +122,7 @@ jobs:
 
           sleep 2
 
-          kubectl wait --timeout=180s --for=jsonpath='{.status.status}'=HEALTHY istiooperator istio-gateway --namespace=istio-system
+          kubectl wait --timeout=240s --for=jsonpath='{.status.status}'=HEALTHY istiooperator istio-gateway --namespace=istio-system
 
       - name: Configure DNS in Kubernetes
         run: |
@@ -169,14 +168,14 @@ jobs:
       - name: Create Peer org
         run: |
           export PEER_IMAGE=hyperledger/fabric-peer
-          export PEER_VERSION=2.5.5
+          export PEER_VERSION=2.5.10
 
           export CA_IMAGE=hyperledger/fabric-ca
-          export CA_VERSION=1.5.7
+          export CA_VERSION=1.5.13
 
           kubectl hlf ca create --image=$CA_IMAGE --version=$CA_VERSION --storage-class=standard --capacity=2Gi --name=org1-ca \
               --enroll-id=enroll --hosts=org1-ca.localho.st --enroll-pw=enrollpw
-          kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all    
+          kubectl wait --timeout=240s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all    
 
           # register user for the peers
           kubectl hlf ca register --name=org1-ca --user=peer --secret=peerpw --type=peer \
@@ -186,26 +185,26 @@ jobs:
           kubectl hlf peer create --statedb=couchdb --image=$PEER_IMAGE --version=$PEER_VERSION \
                   --storage-class=standard --enroll-id=peer --mspid=Org1MSP \
                   --enroll-pw=peerpw --hosts=peer0-org1.localho.st --capacity=5Gi --name=org1-peer0 --ca-name=org1-ca.default
-          kubectl wait --timeout=180s --for=condition=Running fabricpeers.hlf.kungfusoftware.es --all
+          kubectl wait --timeout=240s --for=condition=Running fabricpeers.hlf.kungfusoftware.es --all
       - name: Create Orderer Org
         run: |
           export ORDERER_IMAGE=hyperledger/fabric-orderer
-          export ORDERER_VERSION=2.5.5
+          export ORDERER_VERSION=2.5.10
 
           export CA_IMAGE=hyperledger/fabric-ca
-          export CA_VERSION=1.5.7
+          export CA_VERSION=1.5.13
 
           kubectl hlf ca create --image=$CA_IMAGE --version=$CA_VERSION --storage-class=standard --capacity=2Gi --name=ord-ca \
               --enroll-id=enroll --enroll-pw=enrollpw --hosts=ord-ca.localho.st
 
-          kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
+          kubectl wait --timeout=240s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
           kubectl hlf ca register --name=ord-ca --user=orderer --secret=ordererpw \
               --type=orderer --enroll-id enroll --enroll-secret=enrollpw --mspid=OrdererMSP
 
           kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
               --storage-class=standard --enroll-id=orderer --mspid=OrdererMSP --hosts=orderer0-ord.localho.st --admin-hosts=admin-orderer0-ord.localho.st \
               --enroll-pw=ordererpw --capacity=2Gi --name=ord-node1 --ca-name=ord-ca.default
-          kubectl wait --timeout=180s --for=condition=Running fabricorderernodes.hlf.kungfusoftware.es --all
+          kubectl wait --timeout=240s --for=condition=Running fabricorderernodes.hlf.kungfusoftware.es --all
       - name: Prepare Connection string for Orderer Node
         run: |
           kubectl hlf inspect --output ordservice.yaml -o OrdererMSP
@@ -223,6 +222,8 @@ jobs:
           # enroll using the TLS CA
           kubectl hlf ca enroll --name=ord-ca --namespace=default --user=admin --secret=adminpw --mspid OrdererMSP \
                   --ca-name tlsca  --output admin-tls-ordservice.yaml 
+          kubectl hlf ca enroll --name=ord-ca --namespace=default --user=admin --secret=adminpw --mspid OrdererMSP \
+                  --ca-name ca  --output admin-sign-ordservice.yaml 
 
       - name: Prepare connection string for Peer
         run: |
@@ -241,24 +242,93 @@ jobs:
 
           kubectl create secret generic wallet --namespace=default \
                   --from-file=peer-org1.yaml=$PWD/peer-org1.yaml \
+                  --from-file=admin-sign-ordservice.yaml=$PWD/admin-sign-ordservice.yaml \
                   --from-file=admin-tls-ordservice.yaml=$PWD/admin-tls-ordservice.yaml
           kubectl get fabricorderernodes ord-node1 -o jsonpath='{.status.tlsCert}' > ./orderer-cert.pem
+          export IDENT_8=$(printf "%8s" "")
+          export ORDERER0_TLS_CERT=$(kubectl get fabricorderernodes ord-node1 -o=jsonpath='{.status.tlsCert}' | sed -e "s/^/${IDENT_8}/" )
+          kubectl apply -f - <<EOF
+          apiVersion: hlf.kungfusoftware.es/v1alpha1
+          kind: FabricMainChannel
+          metadata:
+            name: demo
+          spec:
+            name: demo
+            adminOrdererOrganizations:
+              - mspID: OrdererMSP
+            adminPeerOrganizations:
+              - mspID: Org1MSP
+            channelConfig:
+              application:
+                acls: null
+                capabilities:
+                  - V2_0
+                  - V2_5
+                policies: null
+              capabilities:
+                - V2_0
+              orderer:
+                batchSize:
+                  absoluteMaxBytes: 1048576
+                  maxMessageCount: 10
+                  preferredMaxBytes: 524288
+                batchTimeout: 2s
+                capabilities:
+                  - V2_0
+                etcdRaft:
+                  options:
+                    electionTick: 10
+                    heartbeatTick: 1
+                    maxInflightBlocks: 5
+                    snapshotIntervalSize: 16777216
+                    tickInterval: 500ms
+                ordererType: etcdraft
+                policies: null
+                state: STATE_NORMAL
+              policies: null
+            externalOrdererOrganizations: []
+            externalPeerOrganizations: []
+            peerOrganizations:
+              - mspID: Org1MSP
+                caName: "org1-ca"
+                caNamespace: "default"
+            identities:
+              OrdererMSP:
+                secretKey: admin-tls-ordservice.yaml
+                secretName: wallet
+                secretNamespace: default
+              OrdererMSP-tls:
+                secretKey: admin-tls-ordservice.yaml
+                secretName: wallet
+                secretNamespace: default
+              OrdererMSP-sign:
+                secretKey: admin-sign-ordservice.yaml
+                secretName: wallet
+                secretNamespace: default
+              Org1MSP:
+                secretKey: peer-org1.yaml
+                secretName: wallet
+                secretNamespace: default
 
-          kubectl hlf channelcrd main create \
-              --channel-name=demo \
-              --name=demo \
-              --orderer-orgs=OrdererMSP \
-              --peer-orgs=Org1MSP \
-              --admin-orderer-orgs=OrdererMSP \
-              --admin-peer-orgs=Org1MSP \
-              --secret-name=wallet \
-              --secret-ns=default \
-              --consenters=orderer0-ord.localho.st:7050 \
-              --consenter-certificates=./orderer-cert.pem \
-              --identities="OrdererMSP;admin-tls-ordservice.yaml" \
-              --identities="Org1MSP;peer-org1.yaml"
+            ordererOrganizations:
+              - caName: "ord-ca"
+                caNamespace: "default"
+                externalOrderersToJoin:
+                  - host: ord-node1.default
+                    port: 7053
+                mspID: OrdererMSP
+                ordererEndpoints:
+                  - orderer0-ord.localho.st:443
+                orderersToJoin: []
+            orderers:
+              - host: orderer0-ord.localho.st
+                port: 443
+                tlsCert: |-
+          ${ORDERER0_TLS_CERT}
 
-          kubectl wait --timeout=180s --for=condition=RUNNING fabricmainchannels.hlf.kungfusoftware.es --all 
+          EOF
+
+          kubectl wait --timeout=240s --for=condition=RUNNING fabricmainchannels.hlf.kungfusoftware.es --all 
 
 
       - name: Join peers to channel
@@ -276,7 +346,7 @@ jobs:
               --secret-ns=default \
               --secret-key="peer-org1.yaml"
 
-          kubectl wait --timeout=180s --for=condition=RUNNING fabricfollowerchannels.hlf.kungfusoftware.es --all
+          kubectl wait --timeout=240s --for=condition=RUNNING fabricfollowerchannels.hlf.kungfusoftware.es --all
       - name: Get channel
         run: |
           sleep 3
@@ -334,7 +404,7 @@ jobs:
         run: |
           sleep 10
           echo "waiting for deployment to be ready"
-          kubectl wait --timeout=180s --for=condition=Available deployment asset --namespace=default    
+          kubectl wait --timeout=240s --for=condition=Available deployment asset --namespace=default    
           kubectl hlf chaincode invoke --config=org1.yaml \
               --user=admin --peer=org1-peer0.default \
               --chaincode=asset --channel=demo \
@@ -358,7 +428,8 @@ jobs:
           kubectl get fabricmainchannels.hlf.kungfusoftware.es -A -o=custom-columns='NAME:metadata.name,NAMESPACE:metadata.namespace,STATE:status.status,MESSAGE:status.message'
           kubectl get fabricfollowerchannels.hlf.kungfusoftware.es -A -o=custom-columns='NAME:metadata.name,NAMESPACE:metadata.namespace,STATE:status.status,MESSAGE:status.message'
           kubectl get configmap coredns -n kube-system -o yaml
-
+          echo "Logs for hlf-operator deployment:"
+          kubectl logs -l app.kubernetes.io/name=hlf-operator -c manager --tail 2500 
           kubectl get fabricmainchannels  -o yaml
           kubectl get fabricfollowerchannels  -o yaml
 

@@ -23,13 +23,7 @@ For this step you'll need to install the chaincode package on your peer. To do t
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-function getCodeExampleText(language){
-  return `
-kubectl hlf chaincode install \
-    --path=./fixtures/chaincodes/fabcar/go --config=networkConfig.yaml \
-    --language=${language} --label=fabcar --user=admin --peer=org1-peer0.default
-`
-}
+
 
 <Tabs
   defaultValue="nodejs"
@@ -73,7 +67,7 @@ The parameters are:
 - `--user`: The user to use to install the chaincode, this user must be defined in the network config file.
 - `--peer`: The peer to install the chaincode on.
 
-If you don't have any chaincode packages, you can download them from [the bevel-operator-fabric github repository](https://github.com/hyperledger/bevel-operator-fabric/tree/main/fixtures/chaincodes/fabcar).
+If you don't have any chaincode packages, you can download them from [the bevel-operator-fabric github repository](https://github.com/hyperledger-bevel/bevel-operator-fabric/tree/main/fixtures/chaincodes/fabcar).
 
 If no user is found in the networkConfig.yaml, the following error will be thrown:
 

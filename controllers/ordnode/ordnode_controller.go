@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/api/hlf.kungfusoftware.es/v1alpha1"
 	"github.com/kfsoftware/hlf-operator/controllers/certs"
 	"github.com/kfsoftware/hlf-operator/controllers/hlfmetrics"
 	"github.com/kfsoftware/hlf-operator/controllers/utils"
+	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/pkg/apis/hlf.kungfusoftware.es/v1alpha1"
 	operatorv1 "github.com/kfsoftware/hlf-operator/pkg/client/clientset/versioned"
 	"github.com/kfsoftware/hlf-operator/pkg/status"
 	"github.com/pkg/errors"
@@ -37,7 +37,6 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/kubernetes/pkg/api/v1/pod"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -253,7 +252,7 @@ func (r *FabricOrdererNodeReconciler) Reconcile(ctx context.Context, req ctrl.Re
 				r.setConditionStatus(ctx, fabricOrdererNode, hlfv1alpha1.FailedStatus, false, err, false)
 				return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricOrdererNode)
 			}
-			requeueAfter = time.Minute * 10
+			requeueAfter = time.Minute * 60
 		}
 		s, err := GetOrdererState(cfg, r.Config, releaseName, ns, fabricOrdererNode)
 		if err != nil {
@@ -283,6 +282,7 @@ func (r *FabricOrdererNodeReconciler) Reconcile(ctx context.Context, req ctrl.Re
 				return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricOrdererNode)
 			}
 		}
+		reqLogger.Info(fmt.Sprintf("Peer status %s  requeueAfter %v", string(s.Status), requeueAfter))
 		switch s.Status {
 		case hlfv1alpha1.PendingStatus:
 			log.Infof("Orderer %s in pending status", fabricOrdererNode.Name)
@@ -1397,7 +1397,7 @@ func GetOrdererState(conf *action.Configuration, config *rest.Config, releaseNam
 			}
 			if len(pods.Items) > 0 {
 				for _, item := range pods.Items {
-					if pod.IsPodReadyConditionTrue(item.Status) {
+					if utils.IsPodReadyConditionTrue(item.Status) {
 						r.Status = hlfv1alpha1.RunningStatus
 					} else {
 						switch item.Status.Phase {

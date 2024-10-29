@@ -3,6 +3,7 @@ package chaincode
 import (
 	pb "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
 	"github.com/hyperledger/fabric/common/policydsl"
@@ -30,6 +31,23 @@ type getNextCmd struct {
 	collectionsConfig string
 }
 
+type mspFilter struct {
+	mspID string
+}
+
+// Accept returns true if this peer is to be included in the target list
+func (f *mspFilter) Accept(peer fab.Peer) bool {
+	return peer.MSPID() == f.mspID
+}
+
+type mspFilterExclude struct {
+	mspID string
+}
+
+// Accept returns true if this peer is to be included in the target list
+func (f *mspFilterExclude) Accept(peer fab.Peer) bool {
+	return peer.MSPID() != f.mspID
+}
 func (c *getNextCmd) validate() error {
 	if c.property != "version" && c.property != "sequence" {
 		return errors.New("property must be either version or sequence")
@@ -39,6 +57,24 @@ func (c *getNextCmd) validate() error {
 	}
 	return nil
 }
+
+type mspFilterArray struct {
+	mspIDs []string
+}
+
+// Accept returns true if this peer's MSPID is in the array of MSPIDs
+func (f *mspFilterArray) Accept(peer fab.Peer) bool {
+	if len(f.mspIDs) == 0 {
+		return true
+	}
+	for _, mspID := range f.mspIDs {
+		if peer.MSPID() == mspID {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *getNextCmd) run(out io.Writer, stdErr io.Writer) error {
 	mspID := c.mspID
 	configBackend := config.FromFile(c.configPath)
@@ -54,7 +90,10 @@ func (c *getNextCmd) run(out io.Writer, stdErr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	committedCCs, err := resClient.LifecycleQueryCommittedCC(c.channelName, resmgmt.LifecycleQueryCommittedCCRequest{Name: c.name})
+	committedCCs, err := resClient.LifecycleQueryCommittedCC(
+		c.channelName,
+		resmgmt.LifecycleQueryCommittedCCRequest{Name: c.name},
+	)
 	if err != nil {
 		return err
 	}

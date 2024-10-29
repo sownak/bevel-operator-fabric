@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"helm.sh/helm/v3/pkg/release"
 	"os"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
+
+	"helm.sh/helm/v3/pkg/release"
 
 	"github.com/kfsoftware/hlf-operator/controllers/hlfmetrics"
 	"github.com/kfsoftware/hlf-operator/kubectl-hlf/cmd/helpers"
@@ -28,14 +29,13 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/kubernetes/pkg/api/v1/pod"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/go-logr/logr"
-	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/api/hlf.kungfusoftware.es/v1alpha1"
 	"github.com/kfsoftware/hlf-operator/controllers/certs"
 	"github.com/kfsoftware/hlf-operator/controllers/utils"
+	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/pkg/apis/hlf.kungfusoftware.es/v1alpha1"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/storage/driver"
@@ -179,7 +179,7 @@ func GetPeerState(conf *action.Configuration, config *rest.Config, releaseName s
 			}
 			if len(pods.Items) > 0 {
 				for _, item := range pods.Items {
-					if pod.IsPodReadyConditionTrue(item.Status) {
+					if utils.IsPodReadyConditionTrue(item.Status) {
 						r.Status = hlfv1alpha1.RunningStatus
 					} else {
 						switch item.Status.Phase {
@@ -483,7 +483,7 @@ func (r *FabricPeerReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricPeer)
 				}
 			}
-			requeueAfter = time.Minute * 10
+			requeueAfter = time.Minute * 60
 		}
 		s, err := GetPeerState(cfg, r.Config, releaseName, ns, svc)
 		if err != nil {
@@ -511,7 +511,7 @@ func (r *FabricPeerReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricPeer)
 			}
 		}
-		log.Infof("Peer %s in %s status", fPeer.Name, string(s.Status))
+		log.Infof("Peer %s in %s status requeueAfter %v", fPeer.Name, string(s.Status), requeueAfter)
 		switch s.Status {
 		case hlfv1alpha1.PendingStatus:
 			log.Infof("Peer %s in %s status", fPeer.Name, string(s.Status))
@@ -1026,8 +1026,29 @@ func GetConfig(
 				string(utils.EncodeX509Certificate(tlsCert)),
 				tlsKey,
 			)
+			authenticationFailure := false
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to reenroll tls crypto material")
+				if strings.Contains(err.Error(), "Authentication failure") {
+					authenticationFailure = true
+				} else {
+					return nil, errors.Wrapf(err, "failed to reenroll tls crypto material")
+				}
+			}
+			if authenticationFailure {
+				log.Infof("Re enroll failed because of credentials, falling back to enroll")
+				// just enroll the user
+				tlsCert, tlsKey, tlsRootCert, err = CreateTLSCryptoMaterial(
+					conf,
+					tlsParams.Caname,
+					tlsCAUrl,
+					tlsParams.Enrollid,
+					tlsParams.Enrollsecret,
+					string(cacert),
+					hosts,
+				)
+				if err != nil {
+					return nil, err
+				}
 			}
 			log.Infof("Successfully reenrolled tls crypto material for %s", chartName)
 		}
@@ -1145,8 +1166,28 @@ func GetConfig(
 				string(signCertPem),
 				signKey,
 			)
+			authenticationFailure := false
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to reenroll sign crypto material")
+				if strings.Contains(err.Error(), "Authentication failure") {
+					authenticationFailure = true
+				} else {
+					return nil, errors.Wrapf(err, "failed to reenroll sign crypto material")
+				}
+			}
+			if authenticationFailure {
+				log.Infof("Re enroll failed because of credentials, falling back to enroll")
+				// just enroll the user
+				signCert, signKey, signRootCert, err = CreateSignCryptoMaterial(
+					conf,
+					signParams.Caname,
+					caUrl,
+					signParams.Enrollid,
+					signParams.Enrollsecret,
+					string(cacert),
+				)
+				if err != nil {
+					return nil, err
+				}
 			}
 			log.Infof("Reenrolled sign crypto material")
 		}

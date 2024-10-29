@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-config/configtx"
+	"github.com/hyperledger/fabric-config/configtx/orderer"
 	"github.com/hyperledger/fabric-config/protolator"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
@@ -19,8 +23,8 @@ import (
 	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
 	mspimpl "github.com/hyperledger/fabric-sdk-go/pkg/msp"
 	"github.com/hyperledger/fabric/protoutil"
-	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/api/hlf.kungfusoftware.es/v1alpha1"
 	"github.com/kfsoftware/hlf-operator/controllers/utils"
+	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/pkg/apis/hlf.kungfusoftware.es/v1alpha1"
 	operatorv1 "github.com/kfsoftware/hlf-operator/pkg/client/clientset/versioned"
 	"github.com/kfsoftware/hlf-operator/pkg/nc"
 	"github.com/kfsoftware/hlf-operator/pkg/status"
@@ -36,8 +40,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"strings"
-	"time"
 )
 
 // FabricFollowerChannelReconciler reconciles a FabricFollowerChannel object
@@ -48,21 +50,21 @@ type FabricFollowerChannelReconciler struct {
 	Config *rest.Config
 }
 
-const mainChannelFinalizer = "finalizer.mainChannel.hlf.kungfusoftware.es"
+const followerChannelFinalizer = "finalizer.followerChannel.hlf.kungfusoftware.es"
 
-func (r *FabricFollowerChannelReconciler) finalizeMainChannel(reqLogger logr.Logger, m *hlfv1alpha1.FabricFollowerChannel) error {
+func (r *FabricFollowerChannelReconciler) finalizeFollowerChannel(reqLogger logr.Logger, m *hlfv1alpha1.FabricFollowerChannel) error {
 	ns := m.Namespace
 	if ns == "" {
 		ns = "default"
 	}
-	reqLogger.Info("Successfully finalized mainChannel")
+	reqLogger.Info("Successfully finalized followerChannel")
 
 	return nil
 }
 
 func (r *FabricFollowerChannelReconciler) addFinalizer(reqLogger logr.Logger, m *hlfv1alpha1.FabricFollowerChannel) error {
 	reqLogger.Info("Adding Finalizer for the MainChannel")
-	controllerutil.AddFinalizer(m, mainChannelFinalizer)
+	controllerutil.AddFinalizer(m, followerChannelFinalizer)
 
 	// Update CR
 	err := r.Update(context.TODO(), m)
@@ -92,11 +94,11 @@ func (r *FabricFollowerChannelReconciler) Reconcile(ctx context.Context, req ctr
 	}
 	markedToBeDeleted := fabricFollowerChannel.GetDeletionTimestamp() != nil
 	if markedToBeDeleted {
-		if utils.Contains(fabricFollowerChannel.GetFinalizers(), mainChannelFinalizer) {
-			if err := r.finalizeMainChannel(reqLogger, fabricFollowerChannel); err != nil {
+		if utils.Contains(fabricFollowerChannel.GetFinalizers(), followerChannelFinalizer) {
+			if err := r.finalizeFollowerChannel(reqLogger, fabricFollowerChannel); err != nil {
 				return ctrl.Result{}, err
 			}
-			controllerutil.RemoveFinalizer(fabricFollowerChannel, mainChannelFinalizer)
+			controllerutil.RemoveFinalizer(fabricFollowerChannel, followerChannelFinalizer)
 			err := r.Update(ctx, fabricFollowerChannel)
 			if err != nil {
 				return ctrl.Result{}, err
@@ -104,7 +106,7 @@ func (r *FabricFollowerChannelReconciler) Reconcile(ctx context.Context, req ctr
 		}
 		return ctrl.Result{}, nil
 	}
-	if !utils.Contains(fabricFollowerChannel.GetFinalizers(), mainChannelFinalizer) {
+	if !utils.Contains(fabricFollowerChannel.GetFinalizers(), followerChannelFinalizer) {
 		if err := r.addFinalizer(reqLogger, fabricFollowerChannel); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -122,14 +124,15 @@ func (r *FabricFollowerChannelReconciler) Reconcile(ctx context.Context, req ctr
 
 	// join peers
 	mspID := fabricFollowerChannel.Spec.MSPID
-
+	var networkConfig string
 	ncResponse, err := nc.GenerateNetworkConfigForFollower(fabricFollowerChannel, clientSet, hlfClientSet, mspID)
 	if err != nil {
 		r.setConditionStatus(ctx, fabricFollowerChannel, hlfv1alpha1.FailedStatus, false, errors.Wrapf(err, "failed to generate network config"), false)
 		return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricFollowerChannel)
 	}
-	log.Infof("Generated network config: %s", ncResponse.NetworkConfig)
-	configBackend := config.FromRaw([]byte(ncResponse.NetworkConfig), "yaml")
+	networkConfig = ncResponse.NetworkConfig
+	log.Infof("Generated network config: %s", networkConfig)
+	configBackend := config.FromRaw([]byte(networkConfig), "yaml")
 	sdk, err := fabsdk.New(configBackend)
 	if err != nil {
 		r.setConditionStatus(ctx, fabricFollowerChannel, hlfv1alpha1.FailedStatus, false, err, false)
@@ -235,6 +238,7 @@ func (r *FabricFollowerChannelReconciler) Reconcile(ctx context.Context, req ctr
 		r.setConditionStatus(ctx, fabricFollowerChannel, hlfv1alpha1.FailedStatus, false, err, false)
 		return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricFollowerChannel)
 	}
+
 	var buf2 bytes.Buffer
 	err = protolator.DeepMarshalJSON(&buf2, cfgBlock)
 	if err != nil {
@@ -243,6 +247,15 @@ func (r *FabricFollowerChannelReconciler) Reconcile(ctx context.Context, req ctr
 	}
 	log.Infof("Config block: %s", buf2.Bytes())
 	cftxGen := configtx.New(cfgBlock)
+	ordererConfig, err := cftxGen.Orderer().Configuration()
+	if err != nil {
+		r.setConditionStatus(ctx, fabricFollowerChannel, hlfv1alpha1.FailedStatus, false, err, false)
+		return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricFollowerChannel)
+	}
+	if ordererConfig.State == orderer.ConsensusStateMaintenance {
+		r.setConditionStatus(ctx, fabricFollowerChannel, hlfv1alpha1.FailedStatus, false, errors.New("the orderer is in maintenance mode"), false)
+		return r.updateCRStatusOrFailReconcile(ctx, r.Log, fabricFollowerChannel)
+	}
 	app := cftxGen.Application().Organization(mspID)
 	anchorPeers, err := app.AnchorPeers()
 	if err != nil {
@@ -386,8 +399,13 @@ func (r *FabricFollowerChannelReconciler) updateCRStatusOrFailReconcile(ctx cont
 		log.Error(err, fmt.Sprintf("%v failed to update the application status", ErrClientK8s))
 		return reconcile.Result{}, err
 	}
+	if p.Status.Status == hlfv1alpha1.FailedStatus {
+		return reconcile.Result{
+			RequeueAfter: 5 * time.Minute,
+		}, nil
+	}
 	return reconcile.Result{
-		RequeueAfter: 1 * time.Minute,
+		Requeue: false,
 	}, nil
 }
 

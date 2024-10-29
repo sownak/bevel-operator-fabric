@@ -25,6 +25,18 @@ func (c *FakeHlfV1alpha1) FabricChaincodes(namespace string) v1alpha1.FabricChai
 	return &FakeFabricChaincodes{c, namespace}
 }
 
+func (c *FakeHlfV1alpha1) FabricChaincodeApproves() v1alpha1.FabricChaincodeApproveInterface {
+	return &FakeFabricChaincodeApproves{c}
+}
+
+func (c *FakeHlfV1alpha1) FabricChaincodeCommits() v1alpha1.FabricChaincodeCommitInterface {
+	return &FakeFabricChaincodeCommits{c}
+}
+
+func (c *FakeHlfV1alpha1) FabricChaincodeInstalls() v1alpha1.FabricChaincodeInstallInterface {
+	return &FakeFabricChaincodeInstalls{c}
+}
+
 func (c *FakeHlfV1alpha1) FabricChaincodeTemplates(namespace string) v1alpha1.FabricChaincodeTemplateInterface {
 	return &FakeFabricChaincodeTemplates{c, namespace}
 }

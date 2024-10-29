@@ -18,7 +18,6 @@ import (
 	"github.com/kfsoftware/hlf-operator/pkg/status"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
-	"k8s.io/kubernetes/pkg/api/v1/pod"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sort"
 
@@ -29,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/api/hlf.kungfusoftware.es/v1alpha1"
 	"github.com/kfsoftware/hlf-operator/controllers/utils"
+	hlfv1alpha1 "github.com/kfsoftware/hlf-operator/pkg/apis/hlf.kungfusoftware.es/v1alpha1"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"helm.sh/helm/v3/pkg/action"
@@ -746,7 +745,7 @@ func GetCAState(clientSet *kubernetes.Clientset, ca *hlfv1alpha1.FabricCA, relea
 	}
 	if len(pods.Items) > 0 {
 		for _, item := range pods.Items {
-			if pod.IsPodReadyConditionTrue(item.Status) {
+			if utils.IsPodReadyConditionTrue(item.Status) {
 				r.Status = hlfv1alpha1.RunningStatus
 			} else {
 				switch item.Status.Phase {
@@ -1033,6 +1032,7 @@ func Reconcile(
 				return ctrl.Result{}, err
 			}
 		}
+		reqLogger.Info(fmt.Sprintf("CA Status %s", s.Status))
 		switch s.Status {
 		case hlfv1alpha1.PendingStatus:
 			log.Infof("CA %s in pending status, refreshing state in 10 seconds", fca.Name)
@@ -1040,11 +1040,16 @@ func Reconcile(
 				RequeueAfter: 10 * time.Second,
 			}, nil
 		case hlfv1alpha1.RunningStatus:
-			return ctrl.Result{}, nil
-		default:
 			return ctrl.Result{
-				RequeueAfter: 2 * time.Second,
+				RequeueAfter: 60 * time.Minute,
 			}, nil
+		case hlfv1alpha1.FailedStatus:
+			log.Infof("CA %s in failed status, refreshing state in 10 seconds", fca.Name)
+			return ctrl.Result{
+				RequeueAfter: 10 * time.Second,
+			}, nil
+		default:
+			return ctrl.Result{}, nil
 		}
 	} else {
 		cmd := action.NewInstall(cfg)

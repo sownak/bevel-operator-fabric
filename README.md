@@ -32,6 +32,15 @@ For discussions and questions, please join the Hyperledger Foundation Discord:
 
 The channel is located under `BEVEL`, named [`bevel-operator-fabric`](https://discordapp.com/channels/905194001349627914/967823782712594442).
 
+## Hyperledger Meetups
+
+You can watch this video to see how to use it to deploy your own network:
+
+[![Deploying a Network Using SmartBFT in Hyperledger Fabric 3.0](http://img.youtube.com/vi/4taLwa_pl9U/0.jpg)](https://www.youtube.com/watch?v=4taLwa_pl9U "Deploying a Network Using SmartBFT in Hyperledger Fabric 3.0")
+[![Deploying a Network Using SmartBFT in Hyperledger Fabric 3.0](http://img.youtube.com/vi/vM_UzryCOqs/0.jpg)](https://www.youtube.com/watch?v=vM_UzryCOqs "Hyperledger Fabric on Kubernetes")
+[![Hyperledger Fabric on Kubernetes](http://img.youtube.com/vi/namKDeJf5QI/0.jpg)](http://www.youtube.com/watch?v=namKDeJf5QI "Hyperledger Fabric on Kubernetes")
+
+
 ## Tutorial Videos
 
 Step-by-step video tutorials to setup hlf-operator in Kubernetes
@@ -40,11 +49,6 @@ Step-by-step video tutorials to setup hlf-operator in Kubernetes
 
 This workshop provides an in-depth hands on discussion and demonstration of using Bevel and the new Bevel-Operator-Fabric to deploy Hyperledger Fabric on Kubernetes.
 
-## Hyperledger Meetup
-
-You can watch this video to see how to use it to deploy your own network:
-
-[![Hyperledger Fabric on Kubernetes](http://img.youtube.com/vi/namKDeJf5QI/0.jpg)](http://www.youtube.com/watch?v=namKDeJf5QI "Hyperledger Fabric on Kubernetes")
 
 ## Hyperledger Workshops
 
@@ -54,10 +58,10 @@ This workshop provides an in-depth, hands-on discussion and demonstration of usi
 
 ## Sponsor
 
-|                                                                         |                                                                                                                                                                                                                               |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|                                                                               |                                                                                                                                                                                                                                                                                                                     |
+|-------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | ![galagames logo](https://avatars.githubusercontent.com/u/135145372?s=200&v=4) | Gala Games is a blockchain gaming platform that empowers players to earn cryptocurrencies and NFTs through gameplay. Founded in 2018 by Eric Schiermeyer, co-founder of Zynga, it aims to create a new type of gaming experience. The platform offers limited edition NFTs and allows players to earn Gala tokens |
-| ![kfs logo](https://avatars.githubusercontent.com/u/74511895?s=200&v=4) | If you want to design and deploy a secure Blockchain network based on the latest version of Hyperledger Fabric, feel free to contact dviejo@kungfusoftware.es or visit [https://kfs.es/blockchain](https://kfs.es/blockchain) |
+| ![kfs logo](https://avatars.githubusercontent.com/u/74511895?s=200&v=4)       | If you want to design and deploy a secure Blockchain network based on the latest version of Hyperledger Fabric, feel free to contact dviejo@kungfusoftware.es or visit [https://kfs.es/blockchain](https://kfs.es/blockchain)                                                                                       |
 
 ## Getting started
 
@@ -76,13 +80,21 @@ Ensure you have these ports available before creating the cluster:
 
 If these ports are not available this tutorial will not work.
 
+### Using K3D
+
+```bash
+k3d cluster create  -p "80:30949@agent:0" -p "443:30950@agent:0" --agents 2 k8s-hlf
+```
+
+### Using KinD
+
 ```bash
 cat << EOF > kind-config.yaml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
-  image: kindest/node:v1.25.8
+  image: kindest/node:v1.30.2
   extraPortMappings:
   - containerPort: 30949
     hostPort: 80
@@ -106,7 +118,7 @@ To install helm: [https://helm.sh/docs/intro/install/](https://helm.sh/docs/intr
 ```bash
 helm repo add kfs https://kfsoftware.github.io/hlf-helm-charts --force-update
 
-helm install hlf-operator --version=1.9.2 -- kfs/hlf-operator
+helm install hlf-operator --version=1.10.0 -- kfs/hlf-operator
 ```
 
 
@@ -133,6 +145,9 @@ Install Istio on the Kubernetes cluster:
 ```bash
 
 kubectl create namespace istio-system
+
+export ISTIO_PATH=$(echo $PWD/istio-*/bin)
+export PATH="$PATH:$ISTIO_PATH"
 
 istioctl operator init
 
@@ -207,13 +222,13 @@ EOF
 
 ```bash
 export PEER_IMAGE=hyperledger/fabric-peer
-export PEER_VERSION=2.5.5
+export PEER_VERSION=2.5.10
 
 export ORDERER_IMAGE=hyperledger/fabric-orderer
-export ORDERER_VERSION=2.5.5
+export ORDERER_VERSION=2.5.10
 
 export CA_IMAGE=hyperledger/fabric-ca
-export CA_VERSION=1.5.7
+export CA_VERSION=1.5.13
 ```
 
 
@@ -221,13 +236,13 @@ export CA_VERSION=1.5.7
 
 ```bash
 export PEER_IMAGE=hyperledger/fabric-peer
-export PEER_VERSION=2.5.5
+export PEER_VERSION=2.5.10
 
 export ORDERER_IMAGE=hyperledger/fabric-orderer
-export ORDERER_VERSION=2.5.5
+export ORDERER_VERSION=2.5.10
 
 export CA_IMAGE=hyperledger/fabric-ca             
-export CA_VERSION=1.5.7
+export CA_VERSION=1.5.13
 
 ```
 
@@ -271,11 +286,19 @@ data:
 EOF
 ```
 
+### Configure Storage Class
+Set storage class depending on the Kubernetes cluster you are using:
+```bash
+# for Kind
+export SC_NAME=standard
+# for K3D
+export SC_NAME=local-path
+```
+
 ### Deploy a certificate authority
 
 ```bash
-
-kubectl hlf ca create  --image=$CA_IMAGE --version=$CA_VERSION --storage-class=standard --capacity=1Gi --name=org1-ca \
+kubectl hlf ca create  --image=$CA_IMAGE --version=$CA_VERSION --storage-class=$SC_NAME --capacity=1Gi --name=org1-ca \
     --enroll-id=enroll --enroll-pw=enrollpw --hosts=org1-ca.localho.st --istio-port=443
 
 kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
@@ -299,14 +322,10 @@ kubectl hlf ca register --name=org1-ca --user=peer --secret=peerpw --type=peer \
 ### Deploy a peer
 
 ```bash
-kubectl hlf peer create --statedb=leveldb --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=standard --enroll-id=peer --mspid=Org1MSP \
+kubectl hlf peer create --statedb=leveldb --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=$SC_NAME --enroll-id=peer --mspid=Org1MSP \
         --enroll-pw=peerpw --capacity=5Gi --name=org1-peer0 --ca-name=org1-ca.default \
         --hosts=peer0-org1.localho.st --istio-port=443
 
-
-kubectl hlf peer create --statedb=leveldb --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=standard --enroll-id=peer --mspid=Org1MSP \
-        --enroll-pw=peerpw --capacity=5Gi --name=org1-peer1 --ca-name=org1-ca.default \
-        --hosts=peer1-org1.localho.st --istio-port=443
 
 kubectl wait --timeout=180s --for=condition=Running fabricpeers.hlf.kungfusoftware.es --all
 ```
@@ -315,7 +334,6 @@ Check that the peer is deployed and works:
 
 ```bash
 openssl s_client -connect peer0-org1.localho.st:443
-openssl s_client -connect peer1-org1.localho.st:443
 ```
 
 ## Deploy an `Orderer` organization
@@ -330,7 +348,7 @@ To deploy an `Orderer` organization we have to:
 
 ```bash
 
-kubectl hlf ca create  --image=$CA_IMAGE --version=$CA_VERSION --storage-class=standard --capacity=1Gi --name=ord-ca \
+kubectl hlf ca create  --image=$CA_IMAGE --version=$CA_VERSION --storage-class=$SC_NAME --capacity=1Gi --name=ord-ca \
     --enroll-id=enroll --enroll-pw=enrollpw --hosts=ord-ca.localho.st --istio-port=443
 
 kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
@@ -353,22 +371,29 @@ kubectl hlf ca register --name=ord-ca --user=orderer --secret=ordererpw \
 ### Deploy orderer
 
 ```bash
+
 kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
-    --storage-class=standard --enroll-id=orderer --mspid=OrdererMSP \
+    --storage-class=$SC_NAME --enroll-id=orderer --mspid=OrdererMSP \
     --enroll-pw=ordererpw --capacity=2Gi --name=ord-node1 --ca-name=ord-ca.default \
     --hosts=orderer0-ord.localho.st --admin-hosts=admin-orderer0-ord.localho.st --istio-port=443
 
 
 kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
-    --storage-class=standard --enroll-id=orderer --mspid=OrdererMSP \
+    --storage-class=$SC_NAME --enroll-id=orderer --mspid=OrdererMSP \
     --enroll-pw=ordererpw --capacity=2Gi --name=ord-node2 --ca-name=ord-ca.default \
     --hosts=orderer1-ord.localho.st --admin-hosts=admin-orderer1-ord.localho.st --istio-port=443
 
 
 kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
-    --storage-class=standard --enroll-id=orderer --mspid=OrdererMSP \
+    --storage-class=$SC_NAME --enroll-id=orderer --mspid=OrdererMSP \
     --enroll-pw=ordererpw --capacity=2Gi --name=ord-node3 --ca-name=ord-ca.default \
     --hosts=orderer2-ord.localho.st --admin-hosts=admin-orderer2-ord.localho.st --istio-port=443
+
+
+kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
+    --storage-class=$SC_NAME --enroll-id=orderer --mspid=OrdererMSP \
+    --enroll-pw=ordererpw --capacity=2Gi --name=ord-node4 --ca-name=ord-ca.default \
+    --hosts=orderer3-ord.localho.st --admin-hosts=admin-orderer3-ord.localho.st --istio-port=443
 
 
 
@@ -383,6 +408,9 @@ kubectl get pods
 
 ```bash
 openssl s_client -connect orderer0-ord.localho.st:443
+openssl s_client -connect orderer1-ord.localho.st:443
+openssl s_client -connect orderer2-ord.localho.st:443
+openssl s_client -connect orderer3-ord.localho.st:443
 ```
 
 
@@ -402,6 +430,10 @@ kubectl hlf ca register --name=ord-ca --user=admin --secret=adminpw \
 kubectl hlf ca enroll --name=ord-ca --namespace=default \
     --user=admin --secret=adminpw --mspid OrdererMSP \
     --ca-name tlsca  --output orderermsp.yaml
+    
+kubectl hlf ca enroll --name=ord-ca --namespace=default \
+    --user=admin --secret=adminpw --mspid OrdererMSP \
+    --ca-name ca  --output orderermspsign.yaml
 ```
 
 ### Register and enrolling Org1MSP Orderer identity
@@ -442,10 +474,11 @@ kubectl hlf identity create --name org1-admin --namespace default \
 ### Create the secret
 
 ```bash
-
 kubectl create secret generic wallet --namespace=default \
         --from-file=org1msp.yaml=$PWD/org1msp.yaml \
-        --from-file=orderermsp.yaml=$PWD/orderermsp.yaml
+        --from-file=orderermsp.yaml=$PWD/orderermsp.yaml \
+        --from-file=orderermspsign.yaml=$PWD/orderermspsign.yaml
+
 ```
 
 ### Create main channel
@@ -453,17 +486,21 @@ kubectl create secret generic wallet --namespace=default \
 ```bash
 export PEER_ORG_SIGN_CERT=$(kubectl get fabriccas org1-ca -o=jsonpath='{.status.ca_cert}')
 export PEER_ORG_TLS_CERT=$(kubectl get fabriccas org1-ca -o=jsonpath='{.status.tlsca_cert}')
+
 export IDENT_8=$(printf "%8s" "")
 export ORDERER_TLS_CERT=$(kubectl get fabriccas ord-ca -o=jsonpath='{.status.tlsca_cert}' | sed -e "s/^/${IDENT_8}/" )
 export ORDERER0_TLS_CERT=$(kubectl get fabricorderernodes ord-node1 -o=jsonpath='{.status.tlsCert}' | sed -e "s/^/${IDENT_8}/" )
+export ORDERER1_TLS_CERT=$(kubectl get fabricorderernodes ord-node2 -o=jsonpath='{.status.tlsCert}' | sed -e "s/^/${IDENT_8}/" )
+export ORDERER2_TLS_CERT=$(kubectl get fabricorderernodes ord-node3 -o=jsonpath='{.status.tlsCert}' | sed -e "s/^/${IDENT_8}/" )
+export ORDERER3_TLS_CERT=$(kubectl get fabricorderernodes ord-node4 -o=jsonpath='{.status.tlsCert}' | sed -e "s/^/${IDENT_8}/" )
 
 kubectl apply -f - <<EOF
 apiVersion: hlf.kungfusoftware.es/v1alpha1
 kind: FabricMainChannel
 metadata:
-  name: demo2
+  name: demo
 spec:
-  name: demo2
+  name: demo
   adminOrdererOrganizations:
     - mspID: OrdererMSP
   adminPeerOrganizations:
@@ -473,6 +510,7 @@ spec:
       acls: null
       capabilities:
         - V2_0
+        - V2_5
       policies: null
     capabilities:
       - V2_0
@@ -496,71 +534,69 @@ spec:
       state: STATE_NORMAL
     policies: null
   externalOrdererOrganizations: []
+  externalPeerOrganizations: []
   peerOrganizations:
     - mspID: Org1MSP
       caName: "org1-ca"
       caNamespace: "default"
+
   identities:
     OrdererMSP:
       secretKey: orderermsp.yaml
+      secretName: wallet
+      secretNamespace: default
+    OrdererMSP-tls:
+      secretKey: orderermsp.yaml
+      secretName: wallet
+      secretNamespace: default
+    OrdererMSP-sign:
+      secretKey: orderermspsign.yaml
       secretName: wallet
       secretNamespace: default
     Org1MSP:
       secretKey: org1msp.yaml
       secretName: wallet
       secretNamespace: default
-  externalPeerOrganizations: 
-  - mspID: Org2MSP
-    tlsRootCert: |
-        -----BEGIN CERTIFICATE-----
-        MIICRjCCAeugAwIBAgIQHA5nWgCvnS9ECuauCtat6TAKBggqhkjOPQQDAjBtMQsw
-        CQYDVQQGEwJFUzERMA8GA1UEBxMIQWxpY2FudGUxETAPBgNVBAkTCEFsaWNhbnRl
-        MRkwFwYDVQQKExBLdW5nIEZ1IFNvZnR3YXJlMQ0wCwYDVQQLEwRUZWNoMQ4wDAYD
-        VQQDEwV0bHNjYTAeFw0yMzExMTIxNTA3MTlaFw0zMzExMTMxNTA3MTlaMG0xCzAJ
-        BgNVBAYTAkVTMREwDwYDVQQHEwhBbGljYW50ZTERMA8GA1UECRMIQWxpY2FudGUx
-        GTAXBgNVBAoTEEt1bmcgRnUgU29mdHdhcmUxDTALBgNVBAsTBFRlY2gxDjAMBgNV
-        BAMTBXRsc2NhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVB/ZqhVePy96JJH/
-        QhYCT6hRlH7xQVSrTwI1QjLG6GgENV2c10m2EkXH/BHpLJCjZ8ZkGiqVVx/XMxZd
-        E6p1B6NtMGswDgYDVR0PAQH/BAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMCBggr
-        BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdDgQiBCBcmb8svFB8Yn96e3d4
-        Ft+8wZTrAYLielLn6Je/zxbjODAKBggqhkjOPQQDAgNJADBGAiEA3ad5GVhA5RSr
-        mjhnKlazFh53einWYfWxcYNy42v+EbcCIQCt+Fc4nzlMg0ebG3HDlpa9wjJpX9MW
-        caEunJxSdY4vWg==
-        -----END CERTIFICATE-----
-    signRootCert: |
-        -----BEGIN CERTIFICATE-----
-        MIICQTCCAeagAwIBAgIRALIMDeWXSDaW2cYssTwLrTAwCgYIKoZIzj0EAwIwajEL
-        MAkGA1UEBhMCRVMxETAPBgNVBAcTCEFsaWNhbnRlMREwDwYDVQQJEwhBbGljYW50
-        ZTEZMBcGA1UEChMQS3VuZyBGdSBTb2Z0d2FyZTENMAsGA1UECxMEVGVjaDELMAkG
-        A1UEAxMCY2EwHhcNMjMxMTEyMTUwNzE5WhcNMzMxMTEzMTUwNzE5WjBqMQswCQYD
-        VQQGEwJFUzERMA8GA1UEBxMIQWxpY2FudGUxETAPBgNVBAkTCEFsaWNhbnRlMRkw
-        FwYDVQQKExBLdW5nIEZ1IFNvZnR3YXJlMQ0wCwYDVQQLEwRUZWNoMQswCQYDVQQD
-        EwJjYTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAomf+HmUFMdRS7D+IZRCEkQ
-        QEDyrakkXYEE/vwSlXhSW5PsVVXQdi/wmXj2YwoPqsDk2IrXc7KT2tni5wOxJ8mj
-        bTBrMA4GA1UdDwEB/wQEAwIBpjAdBgNVHSUEFjAUBggrBgEFBQcDAgYIKwYBBQUH
-        AwEwDwYDVR0TAQH/BAUwAwEB/zApBgNVHQ4EIgQgESLOdwga9AciHgTGFTR6Zxzh
-        Z/vpQ2gC3V0MbzFvfOYwCgYIKoZIzj0EAwIDSQAwRgIhAKLN7BlISJJzjjHOqJ25
-        EFfWSywv6MgddOsGgrQxsedCAiEAxhMj/EJcYvVu5rr+xiHo7TarixkdvmA5k/eW
-        kOWiji0=
-        -----END CERTIFICATE-----
 
   ordererOrganizations:
     - caName: "ord-ca"
       caNamespace: "default"
       externalOrderersToJoin:
-        - host: ord-node1
+        - host: ord-node1.default
+          port: 7053
+        - host: ord-node2.default
+          port: 7053
+        - host: ord-node3.default
+          port: 7053
+        - host: ord-node4.default
           port: 7053
       mspID: OrdererMSP
       ordererEndpoints:
         - orderer0-ord.localho.st:443
+        - orderer1-ord.localho.st:443
+        - orderer2-ord.localho.st:443
+        - orderer3-ord.localho.st:443
       orderersToJoin: []
   orderers:
     - host: orderer0-ord.localho.st
       port: 443
       tlsCert: |-
 ${ORDERER0_TLS_CERT}
+    - host: orderer1-ord.localho.st
+      port: 443
+      tlsCert: |-
+${ORDERER1_TLS_CERT}
+    - host: orderer2-ord.localho.st
+      port: 443
+      tlsCert: |-
+${ORDERER2_TLS_CERT}
+    - host: orderer3-ord.localho.st
+      port: 443
+      tlsCert: |-
+${ORDERER3_TLS_CERT}
 
 EOF
+
 ```
 
 ## Join peer to the channel
@@ -574,7 +610,7 @@ kubectl apply -f - <<EOF
 apiVersion: hlf.kungfusoftware.es/v1alpha1
 kind: FabricFollowerChannel
 metadata:
-  name: demo2-org1msp
+  name: demo-org1msp
 spec:
   anchorPeers:
     - host: peer0-org1.localho.st
@@ -584,7 +620,7 @@ spec:
     secretName: wallet
     secretNamespace: default
   mspId: Org1MSP
-  name: demo2
+  name: demo
   externalPeersToJoin: []
   orderers:
     - certificate: |
@@ -597,8 +633,6 @@ EOF
 
 
 ```
-
-
 
 ## Install a chaincode
 
@@ -713,6 +747,7 @@ kubectl hlf chaincode commit --config=org1.yaml --user=admin --mspid=Org1MSP \
 
 
 ## Invoke a transaction on the channel
+
 ```bash
 kubectl hlf chaincode invoke --config=org1.yaml \
     --user=admin --peer=org1-peer0.default \
@@ -721,6 +756,7 @@ kubectl hlf chaincode invoke --config=org1.yaml \
 ```
 
 ## Query assets in the channel
+
 ```bash
 kubectl hlf chaincode query --config=org1.yaml \
     --user=admin --peer=org1-peer0.default \
@@ -733,53 +769,12 @@ At this point, you should have:
 
 - Ordering service with 1 nodes and a CA
 - Peer organization with a peer and a CA
-- A channel **demo2**
+- A channel **demo**
 - A chaincode install in peer0
 - A chaincode approved and committed
 
 If something went wrong or didn't work, please, open an issue.
 
-
-
-### Prepare connection string for a peer
-
-To prepare the connection string, we have to create a CRD of type `FabricNetworkConfig` with the following command:
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: hlf.kungfusoftware.es/v1alpha1
-kind: FabricNetworkConfig
-metadata:
-  name: nc
-  namespace: default
-spec:
-  channels:
-    - testbft02
-  identities:
-    - name: org1-admin
-      namespace: default
-  internal: false
-  namespaces: []
-  organization: ''
-  organizations:
-    - Org1MSP
-    - OrdererMSP
-  secretName: nc-networkconfig
-EOF
-
-```
-## Launch the explorer
-
-```bash
-export API_HOST=operator-api.localho.st
-export HLF_SECRET_NAME="nc-networkconfig"
-export HLF_MSPID="Org1MSP"
-export HLF_SECRET_KEY="config.yaml" # e.g. networkConfig.yaml
-export HLF_USER="org1-admin-default"
-kubectl hlf operatorapi create --name=operator-api --namespace=default --version="v0.0.17-beta9" --hosts=$API_HOST --ingress-class-name=istio \
-          --hlf-mspid="${HLF_MSPID}" --hlf-secret="${HLF_SECRET_NAME}" --hlf-secret-key="${HLF_SECRET_KEY}" \
-          --hlf-user="${HLF_USER}"
-```
 
 ## Cleanup the environment
 
